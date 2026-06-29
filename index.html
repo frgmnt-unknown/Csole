@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Console</title>
+    <style>
+        body { font-family: 'Courier New', monospace; background-color: #050505; color: #00ff41; padding: 10px; margin: 0; font-size: 13px; }
+        h1 { border-bottom: 2px solid #00ff41; padding-bottom: 10px; margin-bottom: 15px; font-size: 1.1rem; }
+        .stat-box { margin-bottom: 15px; border: 1px solid #333; padding: 8px; background: #111; }
+        #log-container { height: 85vh; overflow-y: auto; border: 1px solid #333; background: #000; }
+        .log-entry { border-bottom: 1px solid #333; padding: 15px 10px; margin-bottom: 5px; }
+        .header-line { margin-bottom: 5px; color: #fff; background: #1a1a1a; padding: 8px; border-left: 3px solid #00ff41; }
+        .timestamp { color: #888; display: block; margin-bottom: 2px; font-size: 0.9em; }
+        .event-type { font-weight: bold; text-transform: uppercase; float: right; font-size: 0.8em; }
+        .msg-content { background-color: #222; border-left: 4px solid #f60; color: #fff; padding: 15px; font-size: 1.2em; margin-top: 5px; word-wrap: break-word; }
+        /* --- NEW: Snapshot Styling --- */
+        .snapshot-content { margin-top: 10px; padding: 5px; border: 1px dashed #00ff41; background: #111; }
+        .snapshot-content img { max-width: 100%; height: auto; display: block; }
+        /* --- Data Grid --- */
+        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+        .data-row { display: flex; flex-direction: column; border-bottom: 1px dashed #222; padding-bottom: 4px; margin-bottom: 4px; }
+        .label { color: #666; font-size: 0.8em; text-transform: uppercase; }
+        .value { color: #ddd; white-space: pre-wrap; word-break: break-word; }
+        .full-width { grid-column: 1 / -1; }
+        /* --- Colors --- */
+        .col-visit { color: #00ff41; }
+        .col-msg { color: #f60; }
+        .col-snap { color: #00ffff; } /* Cyan for snapshots */
+        /* --- Mobile --- */
+        @media (max-width: 600px) { .data-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <h1>// LIVE_FEED</h1>
+    <div class="stat-box">EVENTS LOGGED: <span id="visit-count" style="color:#fff">0</span></div>
+    <div id="log-container">Awaiting signal...</div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const firebaseConfig = {
+            apiKey: "AIzaSyD19FsJIWCif0h-ExcGODrok4M7wk_bSBc",
+            authDomain: "void-81e60.firebaseapp.com",
+            databaseURL: "https://void-81e60-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "void-81e60",
+            storageBucket: "void-81e60.appspot.com",
+            messagingSenderId: "749357378719",
+            appId: "1:749357378719:web:6343550759a405e5c1c6aa"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const container = document.getElementById('log-container');
+        
+        db.ref('engagements').on('value', snap => {
+            document.getElementById('visit-count').innerText = snap.val() || 0;
+        });
+
+        const formatDate = (isoString) => {
+            if (!isoString) return 'Unknown Time';
+            const d = new Date(isoString);
+            return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: "Asia/Kolkata" });
+        };
+
+        db.ref('records').limitToLast(100).on('child_added', (snapshot) => {
+            if(container.innerHTML.includes('Awaiting')) container.innerHTML = '';
+            const data = snapshot.val();
+            const info = data.fullDeviceInfo || data;
+            
+            // Determine Type
+            let type = "UNKNOWN";
+            if (info.type === "VISIT") type = "VISIT";
+            else if (info.type === "MESSAGE") type = "MESSAGE";
+            else if (info.type === "SNAPSHOT") type = "SNAPSHOT"; // <<< NEW
+            else if (info.message) type = "MESSAGE"; 
+            else type = "VISIT"; 
+
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const timeStr = formatDate(data.timestamp || info.timestamp);
+            const ipDisplay = info.ip || 'Unknown IP';
+
+            // --- Determine Header Color and Text ---
+            let headerColor, typeColor, typeText;
+            if (type === 'MESSAGE') { headerColor = '#f60'; typeColor = 'col-msg'; typeText = 'MESSAGE'; }
+            else if (type === 'SNAPSHOT') { headerColor = '#00ffff'; typeColor = 'col-snap'; typeText = 'SNAPSHOT'; }
+            else { headerColor = '#00ff41'; typeColor = 'col-visit'; typeText = 'VISIT'; }
+
+            // --- Build Header HTML ---
+            let html = `
+                <div class="header-line" style="border-left-color: ${headerColor}">
+                    <span class="timestamp">${timeStr}</span>
+                    <span class="event-type ${typeColor}">${typeText}</span>
+                    <span style="color:#fff; font-weight:bold;">${ipDisplay}</span>
+                </div>`;
+
+            // --- Build Content HTML ---
+            if (type === 'MESSAGE') {
+                const msgText = info.text || info.message || '[Empty Payload]';
+                html += `<div class="msg-content">${msgText.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`;
+            } 
+            // <<< NEW: SNAPSHOT HANDLING BLOCK >>>
+            else if (type === 'SNAPSHOT') {
+                html += `
+                    <div class="snapshot-content">
+                        <img src="${info.data}" alt="Device Snapshot">
+                    </div>
+                `;
+            }
+            // --- END OF NEW BLOCK ---
+            else { // VISITOR DATA (default)
+                const row = (lbl, val, full=false) => `
+                    <div class="data-row ${full?'full-width':''}">
+                        <span class="label">${lbl}</span>
+                        <span class="value">${val || 'N/A'}</span>
+                    </div>`;
+                
+                html += `
+                <div class="data-grid">
+                    ${row('Device / Browser', info.userAgent, true)}
+                    ${row('Platform', info.platform)}
+                    ${row('Timezone', info.timezone)}
+                    ${row('Screen Size', info.screen)}
+                    ${row('Window Size', info.viewport)}
+                    ${row('RAM', info.ram)}
+                    ${row('Storage', info.storage)}
+                    ${row('CPU Cores', info.cpuCores)}
+                    ${row('Touch Points', info.touchPoints)}
+                    ${row('Battery', info.battery)}
+                    ${row('Connection', info.connection)}
+                    ${row('GPU Renderer', info.gpu, true)}
+                </div>`;
+            }
+
+            entry.innerHTML = html;
+            container.insertBefore(entry, container.firstChild);
+        });
+    });
+    </script>
+</body>
+</html>
